@@ -1,55 +1,46 @@
-/**
- * server.js
- * 
- * Простой Node.js-сервер, который стримит YouTube-видео в формате MP4 (360p).
- * 
- * Перед запуском установите зависимости:
- *   npm install express ytdl-core
- */
-
-const express = require("express");
-const ytdl = require("ytdl-core");
+const express = require('express');
+const ytdl = require('ytdl-core');
+const cors = require('cors');
 
 const app = express();
-const PORT = 8000;
+app.use(cors());
 
-/**
- * Пример запроса:
- *   GET /stream_video?url=https://www.youtube.com/watch?v=VIDEO_ID
- */
-app.get("/stream_video", async (req, res) => {
+// Маршрут, обрабатывающий GET-запрос /stream_video
+app.get('/stream_video', async (req, res) => {
   const videoUrl = req.query.url;
   if (!videoUrl) {
-    return res.status(400).json({ error: "No URL provided" });
+    return res.status(400).json({ error: 'No URL provided' });
   }
 
   try {
-    // Сначала получим метаданные, чтобы извлечь title
+    // Получаем полную информацию о видео
     const info = await ytdl.getInfo(videoUrl);
-    // Заменим символы, которые не подходят для имени файла
-    const safeTitle = (info.videoDetails.title || "video").replace(/[\\/:*?"<>|]/g, "_");
+    // Выбираем формат 18 (360p). Для ytdl-core это либо явный выбор качества, либо через chooseFormat.
+    const format360p = ytdl.chooseFormat(info.formats, { quality: '18' });
+    if (!format360p || !format360p.url) {
+      return res.status(404).json({ error: 'No suitable stream found' });
+    }
 
-    // Указываем клиенту, что это mp4-видео и какое имя файла
-    res.setHeader("Content-Type", "video/mp4");
-    res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp4"`);
+    // Формируем название файла (убираем слэши, чтобы не ломать заголовок)
+    const safeTitle = info.videoDetails.title.replace(/[\\/]/g, '_');
+    const fileName = `${safeTitle}.mp4`;
 
-    // ytdl-core сам найдёт нужный формат по качеству (18 => 360p mp4)
-    const stream = ytdl(videoUrl, { quality: "18" });
-    stream.on("error", (err) => {
-      console.error("Stream error:", err);
-      res.status(500).end("Stream error");
-    });
+    // Отправляем соответствующие заголовки
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
-    // Pipe: читаем поток из ytdl &rarr; отправляем клиенту
-    stream.pipe(res);
-  } catch (err) {
-    console.error("Error:", err);
-    res.status(500).json({ error: err.message });
+    // Создаём поток с видео (360p)
+    const videoStream = ytdl(videoUrl, { format: '18' });
+    // Отдаём поток клиенту
+    videoStream.pipe(res);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
   }
 });
 
-// Запускаем сервер
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server started at http://localhost:${PORT}`);
-  console.log("Use /stream_video?url=https://www.youtube.com/watch?v=... to stream a video");
+  console.log(`Server running on port ${PORT}`);
 });
